@@ -1,18 +1,18 @@
-const { Client, GatewayIntentBits, SlashCommandBuilder, PermissionFlagsBits, EmbedBuilder } = require('discord.js');
+const { Client, GatewayIntentBits, SlashCommandBuilder, PermissionFlagsBits, EmbedBuilder, ActivityType } = require('discord.js');
 
 const client = new Client({
     intents: [
         GatewayIntentBits.Guilds,
         GatewayIntentBits.GuildMessages,
-        GatewayIntentBits.MessageContent,
-        GatewayIntentBits.GuildMembers
+        GatewayIntentBits.MessageContent, // Requires Message Content Intent
+        GatewayIntentBits.GuildMembers   // Requires Server Members Intent
     ]
 });
 
 // Bot Ready Event
 client.once('ready', () => {
     console.log(`✅ Bot ist online als ${client.user.tag}!`);
-    client.user.setActivity('Befehle ausführen', { type: 'WATCHING' });
+    client.user.setActivity('Befehle ausführen', { type: ActivityType.Watching });
 });
 
 // Slash Commands registrieren
@@ -207,7 +207,13 @@ client.on('interactionCreate', async interaction => {
         }
     } catch (error) {
         console.error('Fehler bei Command:', error);
-        await interaction.reply({ content: '❌ Ein Fehler ist aufgetreten!', ephemeral: true });
+        const errorMessage = { content: '❌ Ein Fehler ist aufgetreten!', ephemeral: true };
+        
+        if (interaction.replied || interaction.deferred) {
+            await interaction.followUp(errorMessage);
+        } else {
+            await interaction.reply(errorMessage);
+        }
     }
 });
 
@@ -215,94 +221,119 @@ client.on('interactionCreate', async interaction => {
 async function handleClear(interaction) {
     const amount = interaction.options.getInteger('anzahl') || 10;
     
-    if (amount === 'all') {
-        // Alle Nachrichten löschen (in 100er Blöcken)
-        let deleted = 0;
-        while (true) {
-            const messages = await interaction.channel.messages.fetch({ limit: 100 });
-            if (messages.size === 0) break;
-            
-            const deletedMessages = await interaction.channel.bulkDelete(messages, true);
-            deleted += deletedMessages.size;
-            
-            if (deletedMessages.size < 100) break;
-        }
-        await interaction.reply(`🗑️ Alle Nachrichten gelöscht! (${deleted} Nachrichten)`);
-    } else {
+    try {
         const deleted = await interaction.channel.bulkDelete(amount, true);
-        await interaction.reply(`🗑️ ${deleted.size} Nachrichten gelöscht!`);
+        await interaction.reply({ 
+            content: `🗑️ ${deleted.size} Nachrichten gelöscht!`, 
+            ephemeral: true 
+        });
+    } catch (error) {
+        await interaction.reply({ 
+            content: '❌ Fehler beim Löschen der Nachrichten! (Nachrichten könnten zu alt sein)', 
+            ephemeral: true 
+        });
     }
 }
 
 async function handleKick(interaction) {
     const user = interaction.options.getUser('user');
     const reason = interaction.options.getString('grund') || 'Kein Grund angegeben';
-    const member = interaction.guild.members.cache.get(user.id);
-
-    if (!member.kickable) {
-        return await interaction.reply('❌ Ich kann diesen User nicht kicken!');
-    }
-
-    await member.kick(reason);
     
-    const embed = new EmbedBuilder()
-        .setColor(0xff9900)
-        .setTitle('👢 User gekickt')
-        .addFields(
-            { name: 'User', value: `${user.tag}`, inline: true },
-            { name: 'Moderator', value: `${interaction.user.tag}`, inline: true },
-            { name: 'Grund', value: reason }
-        )
-        .setTimestamp();
+    try {
+        const member = await interaction.guild.members.fetch(user.id);
 
-    await interaction.reply({ embeds: [embed] });
+        if (!member.kickable) {
+            return await interaction.reply({ 
+                content: '❌ Ich kann diesen User nicht kicken!', 
+                ephemeral: true 
+            });
+        }
+
+        await member.kick(reason);
+        
+        const embed = new EmbedBuilder()
+            .setColor(0xff9900)
+            .setTitle('👢 User gekickt')
+            .addFields(
+                { name: 'User', value: `${user.tag}`, inline: true },
+                { name: 'Moderator', value: `${interaction.user.tag}`, inline: true },
+                { name: 'Grund', value: reason }
+            )
+            .setTimestamp();
+
+        await interaction.reply({ embeds: [embed] });
+    } catch (error) {
+        await interaction.reply({ 
+            content: '❌ Fehler beim Kicken des Users!', 
+            ephemeral: true 
+        });
+    }
 }
 
 async function handleMute(interaction) {
     const user = interaction.options.getUser('user');
     const minutes = interaction.options.getInteger('minuten') || 10;
     const reason = interaction.options.getString('grund') || 'Kein Grund angegeben';
-    const member = interaction.guild.members.cache.get(user.id);
+    
+    try {
+        const member = await interaction.guild.members.fetch(user.id);
+        const muteTime = minutes * 60 * 1000; // in milliseconds
+        
+        await member.timeout(muteTime, reason);
 
-    const muteTime = minutes * 60 * 1000; // in milliseconds
-    await member.timeout(muteTime, reason);
+        const embed = new EmbedBuilder()
+            .setColor(0xffaa00)
+            .setTitle('🔇 User gemutet')
+            .addFields(
+                { name: 'User', value: `${user.tag}`, inline: true },
+                { name: 'Dauer', value: `${minutes} Minuten`, inline: true },
+                { name: 'Moderator', value: `${interaction.user.tag}`, inline: true },
+                { name: 'Grund', value: reason }
+            )
+            .setTimestamp();
 
-    const embed = new EmbedBuilder()
-        .setColor(0xffaa00)
-        .setTitle('🔇 User gemutet')
-        .addFields(
-            { name: 'User', value: `${user.tag}`, inline: true },
-            { name: 'Dauer', value: `${minutes} Minuten`, inline: true },
-            { name: 'Moderator', value: `${interaction.user.tag}`, inline: true },
-            { name: 'Grund', value: reason }
-        )
-        .setTimestamp();
-
-    await interaction.reply({ embeds: [embed] });
+        await interaction.reply({ embeds: [embed] });
+    } catch (error) {
+        await interaction.reply({ 
+            content: '❌ Fehler beim Muten des Users!', 
+            ephemeral: true 
+        });
+    }
 }
 
 async function handleBan(interaction) {
     const user = interaction.options.getUser('user');
     const reason = interaction.options.getString('grund') || 'Kein Grund angegeben';
-    const member = interaction.guild.members.cache.get(user.id);
+    
+    try {
+        const member = await interaction.guild.members.fetch(user.id);
 
-    if (!member.bannable) {
-        return await interaction.reply('❌ Ich kann diesen User nicht bannen!');
+        if (!member.bannable) {
+            return await interaction.reply({ 
+                content: '❌ Ich kann diesen User nicht bannen!', 
+                ephemeral: true 
+            });
+        }
+
+        await member.ban({ reason });
+
+        const embed = new EmbedBuilder()
+            .setColor(0xff0000)
+            .setTitle('🔨 User gebannt')
+            .addFields(
+                { name: 'User', value: `${user.tag}`, inline: true },
+                { name: 'Moderator', value: `${interaction.user.tag}`, inline: true },
+                { name: 'Grund', value: reason }
+            )
+            .setTimestamp();
+
+        await interaction.reply({ embeds: [embed] });
+    } catch (error) {
+        await interaction.reply({ 
+            content: '❌ Fehler beim Bannen des Users!', 
+            ephemeral: true 
+        });
     }
-
-    await member.ban({ reason });
-
-    const embed = new EmbedBuilder()
-        .setColor(0xff0000)
-        .setTitle('🔨 User gebannt')
-        .addFields(
-            { name: 'User', value: `${user.tag}`, inline: true },
-            { name: 'Moderator', value: `${interaction.user.tag}`, inline: true },
-            { name: 'Grund', value: reason }
-        )
-        .setTimestamp();
-
-    await interaction.reply({ embeds: [embed] });
 }
 
 async function handleServerInfo(interaction) {
@@ -327,21 +358,29 @@ async function handleServerInfo(interaction) {
 
 async function handleUserInfo(interaction) {
     const user = interaction.options.getUser('user') || interaction.user;
-    const member = interaction.guild.members.cache.get(user.id);
+    
+    try {
+        const member = await interaction.guild.members.fetch(user.id);
 
-    const embed = new EmbedBuilder()
-        .setColor(0x0099ff)
-        .setTitle(`👤 ${user.tag} - User Info`)
-        .setThumbnail(user.displayAvatarURL())
-        .addFields(
-            { name: '🆔 ID', value: user.id, inline: true },
-            { name: '📅 Account erstellt', value: user.createdAt.toLocaleDateString('de-DE'), inline: true },
-            { name: '📋 Höchste Rolle', value: member.roles.highest.name, inline: true },
-            { name: '🚪 Server beigetreten', value: member.joinedAt.toLocaleDateString('de-DE'), inline: true }
-        )
-        .setTimestamp();
+        const embed = new EmbedBuilder()
+            .setColor(0x0099ff)
+            .setTitle(`👤 ${user.tag} - User Info`)
+            .setThumbnail(user.displayAvatarURL())
+            .addFields(
+                { name: '🆔 ID', value: user.id, inline: true },
+                { name: '📅 Account erstellt', value: user.createdAt.toLocaleDateString('de-DE'), inline: true },
+                { name: '📋 Höchste Rolle', value: member.roles.highest.name, inline: true },
+                { name: '🚪 Server beigetreten', value: member.joinedAt.toLocaleDateString('de-DE'), inline: true }
+            )
+            .setTimestamp();
 
-    await interaction.reply({ embeds: [embed] });
+        await interaction.reply({ embeds: [embed] });
+    } catch (error) {
+        await interaction.reply({ 
+            content: '❌ Fehler beim Abrufen der User-Informationen!', 
+            ephemeral: true 
+        });
+    }
 }
 
 async function handleAvatar(interaction) {
@@ -507,6 +546,16 @@ async function handle8Ball(interaction) {
 
     await interaction.reply({ embeds: [embed] });
 }
+
+// Error handling for uncaught exceptions
+process.on('unhandledRejection', error => {
+    console.error('Unhandled promise rejection:', error);
+});
+
+process.on('uncaughtException', error => {
+    console.error('Uncaught exception:', error);
+    process.exit(1);
+});
 
 // Login
 client.login(process.env.DISCORD_TOKEN);
