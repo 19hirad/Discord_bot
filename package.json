@@ -1,0 +1,21 @@
+{
+  "name": "discord-moderation-bot",
+  "version": "1.0.0",
+  "description": "Ein vollständiger Discord Bot mit Moderation und Gambling Features",
+  "main": "index.js",
+  "scripts": {
+    "start": "node index.js"
+  },
+  "dependencies": {
+    "discord.js": "^14.14.1"
+  },
+  "engines": {
+    "node": ">=16.0.0"
+  },
+  "keywords": [
+    "discord",
+    "bot",
+    "moderation",
+    "gambling"
+  ]
+}
